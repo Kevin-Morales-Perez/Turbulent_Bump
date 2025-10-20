@@ -245,19 +245,19 @@ err_nt=1;
 iterations_cont=0;
 
 %Error for interior iterations
-epsilon_uv=0.9e-15;
+epsilon_uv=0.9e-20;
 epsilon_p=5e-9;
-epsilon_nt=1e-14;
+epsilon_nt=9e-9;
 
 %Underelaxation factors
-alpha_u=0.7;  %<---------------------     x-momentum 
-alpha_v=0.7;   %<---------------------     y-momentun
+alpha_uv=0.3;  %<---------------------     x-y momentum 
 alpha_p=0.0008; %<---------------------     pressure correction
 alpha_uv2=1;    %<---------------------     Rie - chow face velocity
 
-max_iterations=6500;% Max outer iterations <---------------------
-max_iterations_u=60;% Max iterations for momentum eqs.
-max_iterations_v=60;% Max iterations for momentum  y eq .
+
+max_iterations=10000;% Max outer iterations <---------------------
+max_iterations_u=120;% Max iterations for momentum eqs.
+max_iterations_v=120;% Max iterations for momentum  y eq .
 max_iterations_p=120;% Max iterations for pressure eq.
 max_iterations_nt=1;%Max iterations for nu_tilde SA Transport eq. 
 residualsMat=zeros(max_iterations,4);% Residual Matrix
@@ -322,16 +322,23 @@ while convergedFlg==false
     %_____________________SIMPLE ALGORITHM______________________________
     
     %1.- MOMENTUM LINK COEFFITIENTS AND SOURCES
-    [aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeff(nx,ny,...
+    %[aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeff(nx,ny,...
+    %nx_upstr,nx_dwnstr,rho,lgtFaces,u_face,v_face,u0,...
+    %aW,aE,aN,aS,dW,dE,dN,dS,dW_c,dN_c,dE_c,dS_c,aP,aPv,suX,suY,...
+    %cellVols,u_corners,v_corners,grad_p,mu,mu_turbulent_fw,...
+    %mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs);
+
+    [aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeffTVD(nx,ny,...
     nx_upstr,nx_dwnstr,rho,lgtFaces,u_face,v_face,u0,...
     aW,aE,aN,aS,dW,dE,dN,dS,dW_c,dN_c,dE_c,dS_c,aP,aPv,suX,suY,...
     cellVols,u_corners,v_corners,grad_p,mu,mu_turbulent_fw,...
-    mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs);
+    mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs,grad_u,grad_v,...
+    uVecNeighbNods,distNeighbNods,u,v);
 
     %2.- SOLVE X MOMENTUM
 
     [u,rsid_x,err_x] = solve_momentum(err_x,max_iterations_u,...
-    nx,ny,u,alpha_u,aP,aW,aN,aE,aS,suX,u_star,rsid_x);
+    nx,ny,u,alpha_uv,aP,aW,aN,aE,aS,suX,u_star,rsid_x);
 
     %3.- SOLVE Y MOMENTUM
 
@@ -341,7 +348,10 @@ while convergedFlg==false
     % should not be the same for the Simetryc boundary condition
 
     [v,rsid_y,err_y] = solve_momentum(err_y,max_iterations_v,...
-    nx,ny,v,alpha_v,aP_temp_v,aW,aN,aE,aS,suY,v_star,rsid_y);
+    nx,ny,v,alpha_uv,aP_temp_v,aW,aN,aE,aS,suY,v_star,rsid_y);
+
+    aP=aP/alpha_uv;
+    aPv=aPv/alpha_uv;
 
     %4.- FACE VELOCITY COMPUTATION USING RIE - CHOW INTERPOLATION*
  
@@ -419,6 +429,10 @@ while convergedFlg==false
     [nu_tilde,rsid_nt,err_nt] = solve_presscorr(err_nt,max_iterations_nt...
         ,nx,ny,nu_tilde,ant_P,ant_W,ant_N,ant_E,ant_S,suNt,rsid_nt...
         ,epsilon_p);
+
+    %[nu_tilde,rsid_nt,err_nt]=Gauss_general_solver(nu_tilde,nu_tilde,...
+    %    ant_P,ant_W,ant_N,ant_E,ant_S,suNt,max_iterations_nt,rsid_nt,...
+    %    epsilon_nt,alpha_sa);
 
     %12.- COMPUTE EDDY VISCOSITY FROM NU TILDE 
 
