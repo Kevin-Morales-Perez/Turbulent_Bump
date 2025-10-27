@@ -64,7 +64,9 @@ cw3=2;
 
 %Geometry defined in MeshBump.m
 
-run("meshbump2.m") %<-----------------------------------------------
+%run("meshbump2.m") %<-----------------------------------------------
+run("mesh_bump_yplus5_150x50_experimental.m") %<-----------------------------------------------
+
 
 %Create variables to store geometrical properties 
 
@@ -137,7 +139,7 @@ distMinWall=zeros(ny,nx);%Minimun distance to the nearest wall for Spalart -
     distNeighbNods,uVecNeighbNods,wlsqOperator,VecCentNodFaceCents,...
     VecCentVertx,weightDistFactors,Xctrs,Yctrs,distMinWall,distPlat);
 
-%% VARIABLES AND COEFFITIENS
+%% VARIABLES AND COEFFICIENTS
 
 u=zeros(ny,nx); %Velocity in X axis
 v=zeros(ny,nx);% Velocity in Y axis 
@@ -226,7 +228,12 @@ ant_P=zeros(ny,nx); %Diagonal
 suX=zeros(ny,nx); %Source for U
 suY=zeros(ny,nx); %Source for V
 suP=zeros(ny,nx); %Source for P
-suNt=zeros(ny,nx); %Source for Nu_tilde 
+suNt=zeros(ny,nx); %Source for Nu_tilde
+
+%Deferred TVD correction terms
+psi_mat_u=zeros(ny,nx,4); %Stores the values of 0.5*psi(r) for u
+psi_mat_v=zeros(ny,nx,4); %Stores the values of 0.5*psi(r) for v
+mass_flux_dir=zeros(ny,nx,4);%Stores mass flux direction 1) positive 0)Neg.
 
 %Residual
 rsid_x=zeros(ny,nx); %X momentum
@@ -250,14 +257,14 @@ epsilon_p=5e-9;
 epsilon_nt=9e-9;
 
 %Underelaxation factors
-alpha_uv=0.3;  %<---------------------     x-y momentum 
+alpha_uv=0.65;  %<---------------------     x-y momentum 
 alpha_p=0.0008; %<---------------------     pressure correction
 alpha_uv2=1;    %<---------------------     Rie - chow face velocity
 
 
 max_iterations=10000;% Max outer iterations <---------------------
-max_iterations_u=120;% Max iterations for momentum eqs.
-max_iterations_v=120;% Max iterations for momentum  y eq .
+max_iterations_u=40;% Max iterations for momentum eqs.
+max_iterations_v=40;% Max iterations for momentum  y eq .
 max_iterations_p=120;% Max iterations for pressure eq.
 max_iterations_nt=1;%Max iterations for nu_tilde SA Transport eq. 
 residualsMat=zeros(max_iterations,4);% Residual Matrix
@@ -322,23 +329,28 @@ while convergedFlg==false
     %_____________________SIMPLE ALGORITHM______________________________
     
     %1.- MOMENTUM LINK COEFFITIENTS AND SOURCES
-    %[aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeff(nx,ny,...
-    %nx_upstr,nx_dwnstr,rho,lgtFaces,u_face,v_face,u0,...
-    %aW,aE,aN,aS,dW,dE,dN,dS,dW_c,dN_c,dE_c,dS_c,aP,aPv,suX,suY,...
-    %cellVols,u_corners,v_corners,grad_p,mu,mu_turbulent_fw,...
-    %mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs);
-
-    [aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeffTVD(nx,ny,...
+    [aW,aE,aN,aS,aP,aPv,suX,suY] = momentum_link_coeff(nx,ny,...
     nx_upstr,nx_dwnstr,rho,lgtFaces,u_face,v_face,u0,...
     aW,aE,aN,aS,dW,dE,dN,dS,dW_c,dN_c,dE_c,dS_c,aP,aPv,suX,suY,...
     cellVols,u_corners,v_corners,grad_p,mu,mu_turbulent_fw,...
-    mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs,grad_u,grad_v,...
-    uVecNeighbNods,distNeighbNods,u,v);
+    mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs);
+
+    %[aW,aE,aN,aS,aP,aPv,suX,suY,psi_mat_u,psi_mat_v,mass_flux_dir] =...
+    %    momentum_link_coeffTVD(nx,ny,nx_upstr,nx_dwnstr,...
+    %    rho,lgtFaces,u_face,v_face,u0,...
+    %    aW,aE,aN,aS,dW,dE,dN,dS,dW_c,dN_c,dE_c,dS_c,aP,aPv,suX,suY,...
+    %    cellVols,u_corners,v_corners,grad_p,mu,mu_turbulent_fw,...
+    %    mu_turbulent_fn,mu_turbulent_fe,mu_turbulent_fs,grad_u,grad_v,...
+    %    uVecNeighbNods,distNeighbNods,u,v,psi_mat_u,psi_mat_v,mass_flux_dir);
 
     %2.- SOLVE X MOMENTUM
 
     [u,rsid_x,err_x] = solve_momentum(err_x,max_iterations_u,...
-    nx,ny,u,alpha_uv,aP,aW,aN,aE,aS,suX,u_star,rsid_x);
+        nx,ny,u,alpha_uv,aP,aW,aN,aE,aS,suX,u_star,rsid_x);
+    %TVD
+    %[u,rsid_x,err_x] = solve_momentumTVD(err_x,max_iterations_u,...
+    %    nx,ny,u,alpha_uv,aP,aW,aN,aE,aS,suX,u_star,rsid_x,psi_mat_u,...
+    %    mass_flux_dir);
 
     %3.- SOLVE Y MOMENTUM
 
@@ -348,16 +360,22 @@ while convergedFlg==false
     % should not be the same for the Simetryc boundary condition
 
     [v,rsid_y,err_y] = solve_momentum(err_y,max_iterations_v,...
-    nx,ny,v,alpha_uv,aP_temp_v,aW,aN,aE,aS,suY,v_star,rsid_y);
+        nx,ny,v,alpha_uv,aP_temp_v,aW,aN,aE,aS,suY,v_star,rsid_y);
+    
+    %TVD
+    %[v,rsid_y,err_y] = solve_momentumTVD(err_y,max_iterations_v,...
+    %    nx,ny,v,alpha_uv,aP_temp_v,aW,aN,aE,aS,suY,v_star,rsid_y,psi_mat_v,...
+    %    mass_flux_dir);
 
+    %Account underelaxation in main diagonals    
     aP=aP/alpha_uv;
     aPv=aPv/alpha_uv;
 
     %4.- FACE VELOCITY COMPUTATION USING RIE - CHOW INTERPOLATION*
  
     [u_face,v_face] = face_vel_intRCnonrthgn2(u,v,p,u_face,v_face,...
-    uVecNormFaces,distNeighbNods,uVecNeighbNods,weightDistFactors,...
-    grad_p,aP,aPv,cellVols,nx_upstr,nx_dwnstr);
+        uVecNormFaces,distNeighbNods,uVecNeighbNods,weightDistFactors,...
+        grad_p,aP,aPv,cellVols,nx_upstr,nx_dwnstr);
 
     %Neumman boundary condition for outlet flow at east edge and north edge
     u_face(:,end)=u(:,end);
@@ -366,8 +384,8 @@ while convergedFlg==false
     %5.- PRESSURE CORRECTION LINK COEFFITIENTS AND MASS INBALANCE (SOURCE)
 
     [ap_W,ap_N,ap_E,ap_S,ap_P,suP] = pressure_link_coeff(u_face,...
-    v_face,aP,aPv,ap_W,ap_N,ap_E,ap_S,ap_P,suP,weightDistFactors,...
-    cellVols,distNeighbNods,lgtFaces,nx_upstr,nx_dwnstr);
+        v_face,aP,aPv,ap_W,ap_N,ap_E,ap_S,ap_P,suP,weightDistFactors,...
+        cellVols,distNeighbNods,lgtFaces,nx_upstr,nx_dwnstr);
 
     %6.- SOLVE PRESSURE CORRECTION
 
@@ -389,12 +407,12 @@ while convergedFlg==false
         grad_p_prime);
 
     [u_star,v_star] = cvel_correct(aP,aPv,u,v,grad_p_prime,cellVols,...
-    nx_upstr,nx_dwnstr,alpha_uv2);
+        nx_upstr,nx_dwnstr,alpha_uv2);
 
     %9.- CORRECT FACE VELOCITY
     
     [u_face,v_face] = fvel_correct(u_face,v_face,p_prime,aP,aPv,...
-    cellVols,weightDistFactors,distNeighbNods,nx_upstr,nx_dwnstr,alpha_uv2);
+        cellVols,weightDistFactors,distNeighbNods,nx_upstr,nx_dwnstr,alpha_uv2);
 
     %______________________TURBULENCE MODELLING__________________________
 
@@ -418,11 +436,11 @@ while convergedFlg==false
     %10.- SPALART -ALLMARAS MODEL LINK COEFFITIENTS AND SOURCE
 
     [ant_W,ant_N,ant_E,ant_S,ant_P,suNt] = saTurbulence_link_coeff(...
-    nu_tilde,nu,vorticity,lgtFaces,cellVols,u_face,v_face,distMinWall,...
-    grad_nu_tilde,dW,dN,dE,dS,dW_c,dN_c,dE_c,dS_c,nu_tilde_corners,...
-    ant_W,ant_N,ant_E,ant_S,ant_P,suNt,...
-    kappa,sigma_sa,cb1,cb2,cv1,cw1,cw2,cw3,...
-    nx,ny,nxSolid);
+        nu_tilde,nu,vorticity,lgtFaces,cellVols,u_face,v_face,distMinWall,...
+        grad_nu_tilde,dW,dN,dE,dS,dW_c,dN_c,dE_c,dS_c,nu_tilde_corners,...
+        ant_W,ant_N,ant_E,ant_S,ant_P,suNt,...
+        kappa,sigma_sa,cb1,cb2,cv1,cw1,cw2,cw3,...
+        nx,ny,nxSolid);
 
     %11.-  SOLVE NU- TILDE
 
@@ -473,6 +491,22 @@ while convergedFlg==false
     else
         convergedFlg=false;
     end
+
+    %14.- RAMPING INLET VELOCITY  
+    %FORCING VELOCITY TO REACH 45
+    if iterations_cont>2300%trigger velocity ramping (2300)
+        if u0<45
+            if mod(iterations_cont,8) == 0
+                % Do something special every n iterations
+                f_ramp=1.03329709877;%Ramping Factor
+                u0=u0*f_ramp;% Ramping U0
+                %enforce again boundary inlet condition
+                u_face(:,1)=u0;
+                Re=u0*rho*(bumpLgt-0.5)/mu; % RECOMPUTE RE
+            end
+        end
+    end
+
 end
 
 
